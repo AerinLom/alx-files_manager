@@ -1,43 +1,48 @@
 import sha1 from 'sha1';
+import Queue from 'bull/lib/queue';
 import { dbClient } from '../utils/db';
 
-class UsersController {
+const userQueue = new Queue('email sending');
+
+export default class UsersController {
   static async postNew(req, res) {
-    const { email, password } = req.body;
+    const email = req.body ? req.body.email : null;
+    const password = req.body ? req.body.password : null;
 
     if (!email) {
-      return res.status(400).json({ error: 'Missing email' });
+      console.log('Missing email in request');
+      res.status(400).json({ error: 'Missing email' });
+      return;
     }
-
     if (!password) {
-      return res.status(400).json({ error: 'Missing password' });
+      console.log('Missing password in request');
+      res.status(400).json({ error: 'Missing password' });
+      return;
     }
 
-    try {
-      const existingUser = await dbClient.collection('users').findOne({ email });
+    const user = await (await dbClient.usersCollection()).findOne({ email });
 
-      if (existingUser) {
-        return res.status(400).json({ error: 'Already exist' });
-      }
-
-      const hashedPassword = sha1(password);
-
-      const newUser = {
-        email,
-        password: hashedPassword,
-      };
-
-      const result = await dbClient.collection('users').insertOne(newUser);
-
-      return res.status(201).json({
-        id: result.insertedId,
-        email: newUser.email,
-      });
-    } catch (err) {
-      console.error(err);
-      return res.status(500).json({ error: 'Server error' });
+    if (user) {
+      console.log('Email already exists:', email);
+      res.status(400).json({ error: 'Already exist' });
+      return;
     }
+
+    const hashedPassword = sha1(password);
+    const usersCollection = await dbClient.usersCollection();
+    const insertionInfo = await usersCollection.insertOne({ email, password: hashedPassword });
+
+    const userId = insertionInfo.insertedId.toString();
+
+    console.log(`User created with ID: ${userId}`);
+
+    userQueue.add({ userId });
+    res.status(201).json({ email, id: userId });
+  }
+
+  static async getMe(req, res) {
+    const { user } = req;
+    console.log(`Fetching details for user ID: ${user._id}`);
+    res.status(200).json({ email: user.email, id: user._id.toString() });
   }
 }
-
-export default UsersController;
