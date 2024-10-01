@@ -31,6 +31,7 @@ export default class UsersController {
     userQueue.add({ userId });
     res.status(201).json({ email, id: userId });
   }
+
   static async getMe(req, res) {
     const token = req.headers['x-token'];
 
@@ -45,7 +46,12 @@ export default class UsersController {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const user = await (await dbClient.usersCollection()).findOne({ _id: dbClient.getObjectId(userId) });
+    const user = await (
+      await dbClient
+        .usersCollection()
+    ).findOne({
+      _id: dbClient.getObjectId(userId),
+    });
 
     if (!user) {
       return res.status(401).json({ error: 'Unauthorized' });
