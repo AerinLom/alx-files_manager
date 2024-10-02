@@ -12,24 +12,35 @@ export default class AuthController {
     }
 
     const base64Credentials = authHeader.split(' ')[1];
-    const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
+    const credentials = Buffer.from(base64Credentials, 'base64').toString('utf-8');
     const [email, password] = credentials.split(':');
 
     if (!email || !password) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return res.status(401).json({ error: 'Unauthorized: Missing credentials' });
     }
 
-    const u = await (await dbClient.usersCollection()).findOne({ email, password: sha1(password) });
+    const hashedPassword = sha1(password);
 
-    if (!u) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      const user = await (
+        await dbClient.usersCollection()
+      ).findOne({ email, password: hashedPassword });
+
+      if (!user) {
+        return res.status(401).json({ error: 'Unauthorized: User not found or invalid password' });
+      }
+
+      const token = uuidv4();
+      const tokenKey = `auth_${token}`;
+
+      const expirationTimeInSeconds = 24 * 60 * 60; // 24 hours
+      await redisClient.set(tokenKey, user._id.toString(), expirationTimeInSeconds);
+
+      return res.status(200).json({ token });
+    } catch (error) {
+      console.error('Error during authentication:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
     }
-
-    const token = uuidv4();
-    const tokenKey = `auth_${token}`;
-    await redisClient.set(tokenKey, u._id.toString(), 'EX', 24 * 60 * 60);
-
-    return res.status(200).json({ token });
   }
 
   static async getDisconnect(req, res) {

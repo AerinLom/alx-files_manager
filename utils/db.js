@@ -60,6 +60,13 @@ class DBClient {
   async filesCollection() {
     return this.client.db().collection('files');
   }
+
+  async uploadFile(data) {
+    await this.db.collection('files').insertOne(data);
+
+    const newFile = await this.db.collection('files').findOne(data);
+    return newFile;
+  }
 }
 
 export const dbClient = new DBClient();

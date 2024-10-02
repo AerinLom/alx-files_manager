@@ -1,11 +1,15 @@
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
+const { ObjectId } = require('mongodb');
+const Bull = require('bull');
 const { dbClient } = require('../utils/db');
 const { redisClient } = require('../utils/redis');
 
 class FilesController {
   static async postUpload(req, res) {
+    const fileQueue = new Bull('fileQueue'); // Added Bull Queue
+
     const token = req.header('X-Token');
     if (!token) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -13,6 +17,12 @@ class FilesController {
 
     const userId = await redisClient.get(`auth_${token}`);
     if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Access the users collection directly from dbClient
+    const user = await dbClient.client.db().collection('users').findOne({ _id: ObjectId(userId) });
+    if (!user) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -33,10 +43,10 @@ class FilesController {
       return res.status(400).json({ error: 'Missing data' });
     }
 
-    if (parentId !== 0) {
-      const parentFile = await dbClient
-        .filesCollection()
-        .findOne({ _id: dbClient.getObjectId(parentId) });
+    const fileParentId = parentId === '0' ? 0 : parentId; // Adjusting parentId logic
+    if (fileParentId !== 0) {
+      const parentFile = await dbClient.client.db().collection('files')
+        .findOne({ _id: ObjectId(fileParentId) });
       if (!parentFile) {
         return res.status(400).json({ error: 'Parent not found' });
       }
@@ -45,19 +55,19 @@ class FilesController {
       }
     }
 
-    const fileDocument = {
-      userId: dbClient.getObjectId(userId),
+    const fileDataDb = {
+      userId: ObjectId(userId),
       name,
       type,
       isPublic,
-      parentId: parentId === 0 ? 0 : dbClient.getObjectId(parentId),
+      parentId: fileParentId === 0 ? 0 : ObjectId(fileParentId), // Ensure ObjectId usage
     };
 
     if (type === 'folder') {
-      const result = await dbClient.filesCollection().insertOne(fileDocument);
+      const result = await dbClient.client.db().collection('files').insertOne(fileDataDb);
       return res.status(201).json({
         id: result.insertedId,
-        ...fileDocument,
+        ...fileDataDb,
       });
     }
 
@@ -69,15 +79,28 @@ class FilesController {
     const localPath = path.join(folderPath, uuidv4());
     const fileBuffer = Buffer.from(data, 'base64');
 
-    fs.writeFileSync(localPath, fileBuffer);
+    // Use fs.promises for asynchronous file writing
+    try {
+      await fs.promises.writeFile(localPath, fileBuffer);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
 
-    fileDocument.localPath = localPath;
+    fileDataDb.localPath = localPath;
 
-    const result = await dbClient.filesCollection().insertOne(fileDocument);
+    const result = await dbClient.client.db().collection('files').insertOne(fileDataDb);
+
+    // Adding to the queue
+    fileQueue.add({
+      userId: fileDataDb.userId,
+      fileId: result.insertedId,
+    });
+
     return res.status(201).json({
       id: result.insertedId,
-      ...fileDocument,
+      ...fileDataDb,
     });
   }
 }
+
 module.exports = FilesController;
