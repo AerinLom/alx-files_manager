@@ -101,6 +101,60 @@ class FilesController {
       ...fileDataDb,
     });
   }
+
+  // Method to get a specific file by ID
+  static async getShow(req, res) {
+    const token = req.header('X-Token');
+
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const userId = await redisClient.get(`auth_${token}`);
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const fileId = req.params.id; // Assuming you're using the file ID from the route
+    try {
+      const file = await dbClient.client.db().collection('files').findOne({
+        _id: ObjectId(fileId),
+        userId: ObjectId(userId),
+      });
+
+      if (!file) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+
+      return res.status(200).json(file);
+    } catch (error) {
+      console.error('Error retrieving file:', error);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  // Method to list all files for a user
+  static async getIndex(req, res) {
+    const token = req.header('X-Token');
+
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const userId = await redisClient.get(`auth_${token}`);
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    try {
+      const files = await dbClient.client.db().collection('files').find({ userId: ObjectId(userId) }).toArray();
+
+      return res.status(200).json(files);
+    } catch (error) {
+      console.error('Error retrieving files:', error);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  }
 }
 
 module.exports = FilesController;
