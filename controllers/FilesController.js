@@ -155,6 +155,125 @@ class FilesController {
       return res.status(500).json({ error: 'Internal server error' });
     }
   }
+  static async putPublish(req, res) {
+    const token = req.header('X-Token');
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+    const redisToken = await redisClient.get(`auth_${token}`);
+    if (!redisToken) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = await dbClient.client.db()
+      .collection('users')
+      .findOne({ _id: ObjectId(redisToken) });
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const idFile = req.params.id || '';
+
+    let fileDocument = await dbClient.client.db()
+      .collection('files')
+      .findOne({ _id: ObjectId(idFile), userId: user._id });
+    if (!fileDocument) return res.status(404).json({ error: 'Not found' });
+
+    await dbClient.client.db()
+      .collection('files')
+      .updateOne({ _id: ObjectId(idFile) }, { $set: { isPublic: true } });
+    fileDocument = await dbClient.client.db()
+      .collection('files')
+      .findOne({ _id: ObjectId(idFile), userId: user._id });
+
+    return res.status(200).json({
+      id: fileDocument._id,
+      userId: fileDocument.userId,
+      name: fileDocument.name,
+      type: fileDocument.type,
+      isPublic: fileDocument.isPublic,
+      parentId: fileDocument.parentId,
+    });
+  }
+
+  static async putUnpublish(req, res) {
+    const token = req.header('X-Token');
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+    const redisToken = await redisClient.get(`auth_${token}`);
+    if (!redisToken) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = await dbClient.client.db()
+      .collection('users')
+      .findOne({ _id: ObjectId(redisToken) });
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const idFile = req.params.id || '';
+
+    let fileDocument = await dbClient.client.db()
+      .collection('files')
+      .findOne({ _id: ObjectId(idFile), userId: user._id });
+    if (!fileDocument) return res.status(404).json({ error: 'Not found' });
+
+    await dbClient.client.db()
+      .collection('files')
+      .updateOne({ _id: ObjectId(idFile), userId: user._id }, { $set: { isPublic: false } });
+    fileDocument = await dbClient.client.db()
+      .collection('files')
+      .findOne({ _id: ObjectId(idFile), userId: user._id });
+
+    return res.status(200).json({
+      id: fileDocument._id,
+      userId: fileDocument.userId,
+      name: fileDocument.name,
+      type: fileDocument.type,
+      isPublic: fileDocument.isPublic,
+      parentId: fileDocument.parentId,
+    });
+  }
+
+  static async getFile(req, res) {
+    const idFile = req.params.id || '';
+    const size = req.query.size || 0;
+
+    const fileDocument = await dbClient.client.db()
+      .collection('files')
+      .findOne({ _id: ObjectId(idFile) });
+    if (!fileDocument) return res.status(404).json({ error: 'Not found' });
+
+    const { isPublic } = fileDocument;
+    const { userId } = fileDocument;
+    const { type } = fileDocument;
+
+    let user = null;
+    let owner = false;
+
+    const token = req.header('X-Token') || null;
+    if (token) {
+      const redisToken = await redisClient.get(`auth_${token}`);
+      if (redisToken) {
+        user = await dbClient.client.db()
+          .collection('users')
+          .findOne({ _id: ObjectId(redisToken) });
+        if (user && user._id.equals(userId)) {
+          owner = true;
+        }
+      }
+    }
+
+    if (isPublic || owner) {
+      if (type === 'folder') {
+        return res.status(200).json(fileDocument);
+      }
+
+      const folderPath = process.env.FOLDER_PATH || '/tmp/files_manager';
+      const filePath = path.join(folderPath, fileDocument.localPath);
+
+      return res.download(filePath, (err) => {
+        if (err) {
+          console.error('Error downloading file:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+      });
+    }
+
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
 }
 
 module.exports = FilesController;
