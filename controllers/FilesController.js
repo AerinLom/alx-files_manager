@@ -6,6 +6,7 @@ const { ObjectId } = require('mongodb');
 const Bull = require('bull');
 const { dbClient } = require('../utils/db');
 const { redisClient } = require('../utils/redis');
+const mime = require('mime-types');
 
 class FilesController {
   static async postUpload(req, res) {
@@ -228,16 +229,17 @@ class FilesController {
       parentId: fileDocument.parentId,
     });
   }
-
   static async getFile(req, res) {
     const idFile = req.params.id || '';
     const size = req.query.size || 0;
 
+    // Fetch the file document from the database
     const fileDocument = await dbClient.client.db()
       .collection('files')
       .findOne({ _id: ObjectId(idFile) });
     if (!fileDocument) return res.status(404).json({ error: 'Not found' });
 
+    // Destructure important properties from the file document
     const { isPublic } = fileDocument;
     const { userId } = fileDocument;
     const { type } = fileDocument;
@@ -245,6 +247,7 @@ class FilesController {
     let user = null;
     let owner = false;
 
+    // Verify user ownership by checking the token
     const token = req.header('X-Token') || null;
     if (token) {
       const redisToken = await redisClient.get(`auth_${token}`);
@@ -258,24 +261,41 @@ class FilesController {
       }
     }
 
-    if (isPublic || owner) {
-      if (type === 'folder') {
-        return res.status(200).json(fileDocument);
-      }
-
-      const folderPath = process.env.FOLDER_PATH || '/tmp/files_manager';
-      const filePath = fileDocument.localPath.startsWith(folderPath) 
-        ? fileDocument.localPath 
-        : path.join(folderPath, fileDocument.localPath);
-      return res.download(filePath, (err) => {
-        if (err) {
-          console.error('Error downloading file:', err);
-          return res.status(500).json({ error: 'Internal server error' });
-        }
-      });
+    // Check if the file is public or if the user is the owner
+    if (!isPublic && !owner) {
+      return res.status(404).json({ error: 'Not found' });
     }
 
-    return res.status(403).json({ error: 'Not Found' });
+    // If the file is a folder, return a 400 error with a specific message
+    if (type === 'folder') {
+      return res.status(400).json({ error: "A folder doesn't have content" });
+    }
+
+    // Construct the file path, accounting for file size
+    const folderPath = process.env.FOLDER_PATH || '/tmp/files_manager';
+    const realPath = size === 0
+      ? fileDocument.localPath
+      : `${fileDocument.localPath}_${size}`;
+
+    const filePath = realPath.startsWith(folderPath)
+      ? realPath
+      : path.join(folderPath, realPath);
+
+    try {
+      // Synchronously read the file contents
+      const dataFile = fs.readFileSync(filePath);
+
+      // Determine the MIME type based on the file name
+      const mimeType = mime.contentType(fileDocument.name);
+      res.setHeader('Content-Type', mimeType);
+
+      // Send the file content as the response
+      return res.send(dataFile);
+    } catch (err) {
+      // Log and return a 404 error if the file is not found
+      console.error('Error downloading file:', err);
+      return res.status(404).json({ error: 'Not found' });
+    }
   }
 }
 
