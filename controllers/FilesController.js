@@ -264,8 +264,9 @@ class FilesController {
       }
 
       const folderPath = process.env.FOLDER_PATH || '/tmp/files_manager';
-      const filePath = path.join(folderPath, fileDocument.localPath);
-
+      const filePath = fileDocument.localPath.startsWith(folderPath) 
+        ? fileDocument.localPath 
+        : path.join(folderPath, fileDocument.localPath);
       return res.download(filePath, (err) => {
         if (err) {
           console.error('Error downloading file:', err);
@@ -274,7 +275,7 @@ class FilesController {
       });
     }
 
-    return res.status(403).json({ error: 'Unauthorized' });
+    return res.status(403).json({ error: 'Not Found' });
   }
 }
 
