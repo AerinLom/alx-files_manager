@@ -10,7 +10,7 @@ const mime = require('mime-types');
 
 class FilesController {
   static async postUpload(req, res) {
-    const fileQueue = new Bull('fileQueue'); // Added Bull Queue
+    const fileQueue = new Bull('fileQueue');
 
     const token = req.header('X-Token');
     if (!token) {
@@ -22,7 +22,6 @@ class FilesController {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Access the users collection directly from dbClient
     const user = await dbClient.client.db().collection('users').findOne({ _id: ObjectId(userId) });
     if (!user) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -45,7 +44,7 @@ class FilesController {
       return res.status(400).json({ error: 'Missing data' });
     }
 
-    const fileParentId = parentId === '0' ? 0 : parentId; // Adjusting parentId logic
+    const fileParentId = parentId === '0' ? 0 : parentId;
     if (fileParentId !== 0) {
       const parentFile = await dbClient.client.db().collection('files')
         .findOne({ _id: ObjectId(fileParentId) });
@@ -62,7 +61,7 @@ class FilesController {
       name,
       type,
       isPublic,
-      parentId: fileParentId === 0 ? 0 : ObjectId(fileParentId), // Ensure ObjectId usage
+      parentId: fileParentId === 0 ? 0 : ObjectId(fileParentId),
     };
 
     if (type === 'folder') {
@@ -81,7 +80,6 @@ class FilesController {
     const localPath = path.join(folderPath, uuidv4());
     const fileBuffer = Buffer.from(data, 'base64');
 
-    // Use fs.promises for asynchronous file writing
     try {
       await fs.promises.writeFile(localPath, fileBuffer);
     } catch (error) {
@@ -92,7 +90,6 @@ class FilesController {
 
     const result = await dbClient.client.db().collection('files').insertOne(fileDataDb);
 
-    // Adding to the queue
     fileQueue.add({
       userId: fileDataDb.userId,
       fileId: result.insertedId,
@@ -104,7 +101,6 @@ class FilesController {
     });
   }
 
-  // Method to get a specific file by ID
   static async getShow(req, res) {
     const token = req.header('X-Token');
 
@@ -117,7 +113,7 @@ class FilesController {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const fileId = req.params.id; // Assuming you're using the file ID from the route
+    const fileId = req.params.id;
     try {
       const file = await dbClient.client.db().collection('files').findOne({
         _id: ObjectId(fileId),
@@ -135,7 +131,6 @@ class FilesController {
     }
   }
 
-  // Method to list all files for a user
   static async getIndex(req, res) {
     const token = req.header('X-Token');
 
@@ -233,13 +228,11 @@ class FilesController {
     const idFile = req.params.id || '';
     const size = req.query.size || 0;
 
-    // Fetch the file document from the database
     const fileDocument = await dbClient.client.db()
       .collection('files')
       .findOne({ _id: ObjectId(idFile) });
     if (!fileDocument) return res.status(404).json({ error: 'Not found' });
 
-    // Destructure important properties from the file document
     const { isPublic } = fileDocument;
     const { userId } = fileDocument;
     const { type } = fileDocument;
@@ -247,7 +240,6 @@ class FilesController {
     let user = null;
     let owner = false;
 
-    // Verify user ownership by checking the token
     const token = req.header('X-Token') || null;
     if (token) {
       const redisToken = await redisClient.get(`auth_${token}`);
@@ -261,17 +253,14 @@ class FilesController {
       }
     }
 
-    // Check if the file is public or if the user is the owner
     if (!isPublic && !owner) {
       return res.status(404).json({ error: 'Not found' });
     }
 
-    // If the file is a folder, return a 400 error with a specific message
     if (type === 'folder') {
       return res.status(400).json({ error: "A folder doesn't have content" });
     }
 
-    // Construct the file path, accounting for file size
     const folderPath = process.env.FOLDER_PATH || '/tmp/files_manager';
     const realPath = size === 0
       ? fileDocument.localPath
@@ -282,17 +271,13 @@ class FilesController {
       : path.join(folderPath, realPath);
 
     try {
-      // Synchronously read the file contents
       const dataFile = fs.readFileSync(filePath);
 
-      // Determine the MIME type based on the file name
       const mimeType = mime.contentType(fileDocument.name);
       res.setHeader('Content-Type', mimeType);
 
-      // Send the file content as the response
       return res.send(dataFile);
     } catch (err) {
-      // Log and return a 404 error if the file is not found
       console.error('Error downloading file:', err);
       return res.status(404).json({ error: 'Not found' });
     }
