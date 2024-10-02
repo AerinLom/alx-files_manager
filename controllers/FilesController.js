@@ -1,3 +1,4 @@
+/* eslint-disable */
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
@@ -155,6 +156,7 @@ class FilesController {
       return res.status(500).json({ error: 'Internal server error' });
     }
   }
+
   static async putPublish(req, res) {
     const token = req.header('X-Token');
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
